@@ -68,15 +68,18 @@ class MultiDatasetSentences(data.Dataset):
                                 dataset_to_protein_embeddings= self.dataset_to_protein_embeddings,
                                 dataset_to_chroms=self.dataset_to_chroms,
                                 dataset_to_starts=self.dataset_to_starts)
+                        perturb_flag = None
                     else:
-                        batch_sentences, mask, seq_len, cell_sentences = \
+                        batch_sentences, mask, seq_len, cell_sentences, \
+                            perturb_flag = \
                             sample_perturbed_cell_sentences(counts, weights, dataset, self.args,
                                 dataset_to_protein_embeddings= self.dataset_to_protein_embeddings,
                                 dataset_to_chroms=self.dataset_to_chroms,
                                 dataset_to_starts=self.dataset_to_starts, 
                                 perturb_gene=self.perturb_gene,
                                 perturb_level=self.perturb_level)
-                    return batch_sentences, mask, idx, seq_len, cell_sentences
+                    return batch_sentences, mask, idx, seq_len, \
+                        cell_sentences, perturb_flag
                 else:
                     idx -= self.num_cells[dataset]
             raise IndexError
@@ -97,24 +100,47 @@ class MultiDatasetSentenceCollator(object):
 
     def __call__(self, batch):
         batch_size = len(batch)
-        batch_sentences = torch.zeros((batch_size, self.pad_length))
-        mask = torch.zeros((batch_size, self.pad_length))
-        cell_sentences = torch.zeros((batch_size, self.pad_length))
+        ## If perturbation setting
+        if len(batch[0][0]) == 2:
+            batch_sentences = torch.zeros((batch_size*2, self.pad_length))
+            mask = torch.zeros((batch_size*2, self.pad_length))
+            cell_sentences = torch.zeros((batch_size*2, self.pad_length))
+            perturb_flag = torch.zeros(batch_size*2)
+            idxs = torch.zeros(batch_size*2)
 
-        idxs = torch.zeros(batch_size)
+        ## if not perturbation setting
+        else:
+            batch_sentences = torch.zeros((batch_size, self.pad_length))
+            mask = torch.zeros((batch_size, self.pad_length))
+            cell_sentences = torch.zeros((batch_size, self.pad_length))
+            idxs = torch.zeros(batch_size)
+            perturb_flag = torch.zeros(batch_size)
 
         i = 0
         max_len = 0
-        for bs, msk, idx, seq_len, cs in batch:
-            batch_sentences[i, :] = bs
-            cell_sentences[i, :] = cs
-            max_len = max(max_len, seq_len)
-            mask[i, :] = msk
-            idxs[i] = idx
 
-            i += 1
+        for bs, msk, idx, seq_len, cs, pflag in batch:
+            if len(batch[0][0]) == 2:
+                batch_sentences[i:i+2, :] = torch.stack(bs).squeeze()
+                cell_sentences[i:i+2, :] = torch.stack(cs).squeeze()
+                max_len = max(max_len, seq_len)
+                mask[i:i+2, :] = torch.stack(msk).squeeze()
+                idxs[i:i+2] = torch.Tensor([idx, idx])
+                perturb_flag[i:i+2] = torch.Tensor(pflag).squeeze()
 
-        return batch_sentences[:, :max_len] , mask[:, :max_len], idxs, cell_sentences
+                i += 2
+            else:
+                batch_sentences[i, :] = bs
+                cell_sentences[i, :] = cs
+                max_len = max(max_len, seq_len)
+                mask[i, :] = msk
+                idxs[i] = idx
+
+                i += 1
+
+        return batch_sentences[:, :max_len] , mask[:, :max_len], idxs, \
+            cell_sentences, perturb_flag
+
 
 
 
@@ -200,15 +226,18 @@ def sample_perturbed_cell_sentences(counts, batch_weights, dataset, args,
     mask = torch.zeros((counts.shape[0], args.pad_length)) # start of masking the whole sequence
     chroms = dataset_to_chroms[dataset] # get the dataset specific chroms for each gene
     starts = dataset_to_starts[dataset] # get the dataset specific genomic start locations for each gene
+    all_gene_names = chroms.index.values
 
     longest_seq_len = 0 # we need to keep track of this so we can subset the batch at the end
     perturb_flag = []
     all_cell_sentences = []
-    
+    all_masks = []
+
     for case in ['unperturbed', 'perturbed']:
         
         ## First set the expression of the TF to zero
-        ## TODO batch_weights[perturb_gene] = 0
+        perturb_idx = np.where(all_gene_names == perturb_gene)[0][0]
+        batch_weights[0, perturb_idx] = 0
 
         for c, cell in enumerate(counts):
             
@@ -221,9 +250,7 @@ def sample_perturbed_cell_sentences(counts, batch_weights, dataset, args,
                                               size=args.sample_size, p=weights,
                                               replace=True)
             elif case == 'perturbed':
-                pass
-                ## TODO add the overexpressed TF
-                ## choice_idx.append([TF] * perturb_level)
+                choice_idx[-perturb_level:] = [perturb_idx]*perturb_level
                 
             choosen_chrom = chroms[choice_idx] # get the sampled genes chromosomes
             # order the genes by chromosome
@@ -276,8 +303,10 @@ def sample_perturbed_cell_sentences(counts, batch_weights, dataset, args,
                 perturb_flag.append([1] * len(cell_sentences))
                 
             all_cell_sentences.append(cell_sentences)
+            all_masks.append(mask)
 
-    all_cell_sentences_pe = all_cell_sentences.long() # token indices
-    all_masks = mask
+    all_cell_sentences_pe = [x.long() for x in all_cell_sentences] #
+    # token indices
     
-    return all_cell_sentences_pe, all_masks, longest_seq_len, all_cell_sentences, perturb_flag
+    return all_cell_sentences_pe, all_masks, longest_seq_len, \
+        all_cell_sentences, perturb_flag

@@ -173,9 +173,11 @@ def adata_path_to_prot_chrom_starts(adata, dataset_species, spec_pe_genes, gene_
 def process_raw_anndata(row, h5_folder_path, npz_folder_path, scp, skip,
                         additional_filter, root):
         path = row.path
-        if not os.path.isfile(root + "/" + path):
+        full_path = os.path.join(root, path)
+        if not os.path.isfile(full_path):
             print( "**********************************")
-            print(f"***********{root + '/' + path} File Missing****")
+            print(f"***********"
+                  f"{full_path} File Missing****")
             print( "**********************************")
             print(path, root)
             return None
@@ -192,8 +194,7 @@ def process_raw_anndata(row, h5_folder_path, npz_folder_path, scp, skip,
         species = row.species
         covar_col = row.covar_col
 
-        ad = sc.read(root + "/" + path)
-        print(root + "/" + path)
+        ad = sc.read(full_path)
         labels = []
         if "cell_type" in ad.obs.columns:
             labels.append("cell_type")

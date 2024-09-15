@@ -222,7 +222,9 @@ def run_eval(adata, name, pe_idx_path, chroms_path, starts_path, shapes_dict,
                                     args=args, npzs_dir=args.dir,
                                     dataset_to_protein_embeddings_path=pe_idx_path,
                                     datasets_to_chroms_path=chroms_path,
-                                    datasets_to_starts_path=starts_path
+                                    datasets_to_starts_path=starts_path,
+                                    perturb_gene=perturb_gene,
+                                    perturb_level=perturb_level
                                     )
     multi_dataset_sentence_collator = MultiDatasetSentenceCollator(args)
 
