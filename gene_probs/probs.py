@@ -1,3 +1,8 @@
+import torch
+import torch.nn as nn
+from tqdm import tqdm
+from uce_model import TransformerModel
+
 class UCEGenePredictor:
     """
     Class to predict binary gene expression from UCE embeddings

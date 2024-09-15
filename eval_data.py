@@ -302,8 +302,8 @@ def sample_perturbed_cell_sentences(counts, batch_weights, dataset, args,
             elif case == 'perturbed':
                 perturb_flag.append([1] * len(cell_sentences))
                 
-            all_cell_sentences.append(cell_sentences)
-            all_masks.append(mask)
+            all_cell_sentences.append(torch.clone(cell_sentences))
+            all_masks.append(torch.clone(mask))
 
     all_cell_sentences_pe = [x.long() for x in all_cell_sentences] #
     # token indices
