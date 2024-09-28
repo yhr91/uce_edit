@@ -222,9 +222,7 @@ def run_eval(adata, name, pe_idx_path, chroms_path, starts_path, shapes_dict,
                                     args=args, npzs_dir=args.dir,
                                     dataset_to_protein_embeddings_path=pe_idx_path,
                                     datasets_to_chroms_path=chroms_path,
-                                    datasets_to_starts_path=starts_path,
-                                    perturb_gene=perturb_gene,
-                                    perturb_level=perturb_level
+                                    datasets_to_starts_path=starts_path
                                     )
     multi_dataset_sentence_collator = MultiDatasetSentenceCollator(args)
 
@@ -234,11 +232,9 @@ def run_eval(adata, name, pe_idx_path, chroms_path, starts_path, shapes_dict,
     dataloader = accelerator.prepare(dataloader)
     pbar = tqdm(dataloader, disable=not accelerator.is_local_main_process)
     dataset_embeds = []
-    all_pert_flags = []
     with torch.no_grad():
         for batch in pbar:
-            batch_sentences, mask, idxs, pert_flags = batch[0], batch[1], \
-                batch[2], batch[-1]
+            batch_sentences, mask, idxs = batch[0], batch[1], batch[2]
             batch_sentences = batch_sentences.permute(1, 0)
             if args.multi_gpu:
                 batch_sentences = model.module.pe_embedding(batch_sentences.long())
@@ -247,25 +243,15 @@ def run_eval(adata, name, pe_idx_path, chroms_path, starts_path, shapes_dict,
             batch_sentences = nn.functional.normalize(batch_sentences,
                                                       dim=2)  # Normalize token outputs now
             _, embedding = model.forward(batch_sentences, mask=mask)
-
             # Fix for duplicates in last batch
-            #accelerator.wait_for_everyone()
-            #embeddings = accelerator.gather_for_metrics((embedding))
-
+            accelerator.wait_for_everyone()
+            embeddings = accelerator.gather_for_metrics((embedding))
             if accelerator.is_main_process:
-                dataset_embeds.extend(embedding.detach().cpu().numpy())
-                all_pert_flags.extend(pert_flags.detach().cpu().numpy())
-
-            assert np.vstack(dataset_embeds).shape[0] == len(all_pert_flags)
+                dataset_embeds.append(embeddings.detach().cpu().numpy())
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         dataset_embeds = np.vstack(dataset_embeds)
-        if perturb_gene is not None:
-            rep_idx = np.repeat(np.arange(len(adata)), 2)
-            name = name + f"_perturb_{perturb_gene}_{perturb_level}"
-            adata = adata[rep_idx]
-            adata.obs['perturb_flag'] = all_pert_flags
         adata.obsm["X_uce"] = dataset_embeds
         write_path = args.dir + f"{name}_uce_adata.h5ad"
         adata.write(write_path)
